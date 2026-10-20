@@ -5,10 +5,82 @@ extension Formatter {
     maxImageBytes: Int = 16 * 1024 * 1024,
     maxTotalImageBytes: Int = 32 * 1024 * 1024
   ) -> String {
-    blockNodes.renderHTML(
-      imageBudget: HTMLImageBudget(
-        maxImageBytes: maxImageBytes, maxTotalImageBytes: maxTotalImageBytes
-      ))
+    htmlExport(maxImageBytes: maxImageBytes, maxTotalImageBytes: maxTotalImageBytes).string
+  }
+
+  func htmlExport(
+    maxImageBytes: Int = 16 * 1024 * 1024,
+    maxTotalImageBytes: Int = 32 * 1024 * 1024,
+    memoryLedger: HTMLImageMemoryLedger = .shared
+  ) -> HTMLExport {
+    let budget = HTMLImageBudget(
+      maxImageBytes: maxImageBytes, maxTotalImageBytes: maxTotalImageBytes,
+      memoryLedger: memoryLedger
+    )
+    return HTMLExport(string: blockNodes.renderHTML(imageBudget: budget), budget: budget)
+  }
+}
+
+/// Keep the image reservations with the HTML through pasteboard or item-provider handoff.
+/// Recipient and framework retention after handoff are outside this ledger.
+final class HTMLExport {
+  let string: String
+  private let budget: HTMLImageBudget
+
+  fileprivate init(string: String, budget: HTMLImageBudget) {
+    self.string = string
+    self.budget = budget
+  }
+}
+
+/// Conservative admission for concurrent app-owned image-derived PNG, base64, HTML and UTF-8
+/// storage. Ordinary text, allocator capacity, legacy encoder temporaries and framework retention
+/// are outside this ledger. The factor is an allowance, not a measured process-memory ceiling.
+final class HTMLImageMemoryLedger: @unchecked Sendable {
+  static let shared = HTMLImageMemoryLedger(limitBytes: 256 * 1024 * 1024)
+  private static let bytesPerEncodedByte = 8
+
+  final class Reservation {
+    private let ledger: HTMLImageMemoryLedger
+    private var chargedBytes: Int
+    let byteLimit: Int
+
+    fileprivate init(ledger: HTMLImageMemoryLedger, byteLimit: Int) {
+      self.ledger = ledger
+      self.byteLimit = byteLimit
+      chargedBytes = byteLimit * HTMLImageMemoryLedger.bytesPerEncodedByte
+    }
+
+    func shrink(toEncodedBytes count: Int) {
+      precondition(count >= 0 && count <= byteLimit)
+      let newCharge = count * HTMLImageMemoryLedger.bytesPerEncodedByte
+      ledger.lock.withLock {
+        precondition(newCharge <= chargedBytes)
+        ledger.heldBytes -= chargedBytes - newCharge
+        chargedBytes = newCharge
+      }
+    }
+
+    deinit { ledger.lock.withLock { ledger.heldBytes -= chargedBytes } }
+  }
+
+  private let lock = NSLock()
+  private let limitBytes: Int
+  private var heldBytes = 0
+
+  init(limitBytes: Int) { self.limitBytes = max(0, limitBytes) }
+
+  var reservedBytes: Int { lock.withLock { heldBytes } }
+
+  func reserve(upToEncodedBytes requested: Int) -> Reservation? {
+    lock.withLock {
+      guard requested > 0 else { return nil }
+      let available = (limitBytes - heldBytes) / Self.bytesPerEncodedByte
+      let admitted = min(requested, available)
+      guard admitted > 0 else { return nil }
+      heldBytes += admitted * Self.bytesPerEncodedByte
+      return Reservation(ledger: self, byteLimit: admitted)
+    }
   }
 }
 
@@ -16,18 +88,24 @@ extension Formatter {
 /// when an attributed document repeats the same image many times.
 private final class HTMLImageBudget {
   private let maxImageBytes: Int
+  private let memoryLedger: HTMLImageMemoryLedger
+  private var reservations: [HTMLImageMemoryLedger.Reservation] = []
   private(set) var remaining: Int
 
-  init(maxImageBytes: Int, maxTotalImageBytes: Int) {
+  init(maxImageBytes: Int, maxTotalImageBytes: Int, memoryLedger: HTMLImageMemoryLedger) {
     self.maxImageBytes = max(0, maxImageBytes)
     remaining = max(0, maxTotalImageBytes)
+    self.memoryLedger = memoryLedger
   }
 
   func admit(_ attachment: AnyAttachment) -> Data? {
     let limit = min(maxImageBytes, remaining)
-    guard limit > 0, let data = attachment.boundedPNGData(maxBytes: limit),
-      !data.isEmpty, data.count <= limit
+    guard let reservation = memoryLedger.reserve(upToEncodedBytes: limit),
+      let data = attachment.boundedPNGData(maxBytes: reservation.byteLimit),
+      !data.isEmpty, data.count <= reservation.byteLimit
     else { return nil }
+    reservation.shrink(toEncodedBytes: data.count)
+    reservations.append(reservation)
     remaining -= data.count
     return data
   }

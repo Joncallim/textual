@@ -1,7 +1,9 @@
 import CoreGraphics
+import Dispatch
 import Foundation
 import SwiftUI
 import Testing
+import UniformTypeIdentifiers
 
 @testable import Textual
 
@@ -100,6 +102,94 @@ struct BoundedHTMLImageTests {
     #expect(html.components(separatedBy: "data:image/png;base64,").count == 2)
     #expect(html.components(separatedBy: "alt").count == 3)
   }
+
+  @Test func overlappingExportsShareReservationUntilHandoff() {
+    let formatter = Formatter(AttributedString())
+    let base: any Textual.Attachment = FixtureAttachment()
+    formatter.blockNodes = [.paragraph(children: [.attachment(AnyAttachment(base))])]
+    let ledger = HTMLImageMemoryLedger(limitBytes: 32)
+
+    var first: HTMLExport? = formatter.htmlExport(
+      maxImageBytes: 5, maxTotalImageBytes: 7, memoryLedger: ledger
+    )
+    #expect(first?.string.contains("ZmFrZQ==") == true)
+    #expect(ledger.reservedBytes == 32)
+    let denied = formatter.htmlExport(maxImageBytes: 5, maxTotalImageBytes: 7, memoryLedger: ledger)
+    #expect(denied.string == "<p>alt</p>")
+    first = nil
+    #expect(ledger.reservedBytes == 0)
+    let admitted = formatter.htmlExport(
+      maxImageBytes: 5, maxTotalImageBytes: 7, memoryLedger: ledger)
+    #expect(admitted.string.contains("ZmFrZQ=="))
+    #expect(ledger.reservedBytes == 32)
+  }
+
+  @Test func shrinkingAReservationReturnsCapacityExactlyOnce() {
+    let ledger = HTMLImageMemoryLedger(limitBytes: 32)
+    var first = ledger.reserve(upToEncodedBytes: 4)
+    #expect(first != nil)
+    #expect(ledger.reservedBytes == 32)
+    first?.shrink(toEncodedBytes: 1)
+    #expect(ledger.reservedBytes == 8)
+    var second = ledger.reserve(upToEncodedBytes: 3)
+    #expect(second?.byteLimit == 3)
+    #expect(ledger.reservedBytes == 32)
+    first = nil
+    #expect(ledger.reservedBytes == 24)
+    second = nil
+    #expect(ledger.reservedBytes == 0)
+  }
+
+  @Test func concurrentAdmissionsNeverExceedTheSharedLimit() {
+    let ledger = HTMLImageMemoryLedger(limitBytes: 64)
+    let observation = ReservationObservation()
+    DispatchQueue.concurrentPerform(iterations: 64) { _ in
+      for _ in 0..<32 {
+        guard let reservation = ledger.reserve(upToEncodedBytes: 4) else { continue }
+        observation.record(ledger.reservedBytes)
+        reservation.shrink(toEncodedBytes: 1)
+        observation.record(ledger.reservedBytes)
+        withExtendedLifetime(reservation) {}
+      }
+    }
+    #expect(observation.maximum <= 64)
+    #expect(ledger.reservedBytes == 0)
+  }
+
+  @Test func nearIntegerMaximumLedgerAdmissionDoesNotOverflow() {
+    let ledger = HTMLImageMemoryLedger(limitBytes: Int.max)
+    var reservation = ledger.reserve(upToEncodedBytes: Int.max)
+    #expect(reservation?.byteLimit == Int.max / 8)
+    #expect(ledger.reservedBytes == (Int.max / 8) * 8)
+    reservation?.shrink(toEncodedBytes: 1)
+    #expect(ledger.reservedBytes == 8)
+    reservation = nil
+    #expect(ledger.reservedBytes == 0)
+  }
+
+  @Test func itemProviderFreezesMutableAttributedInput() throws {
+    let source = NSMutableAttributedString(
+      attributedString: try NSAttributedString(markdown: "Before"))
+    let provider = TransferableText(attributedString: source)
+    source.mutableString.setString("After")
+    var exported: Data?
+    _ = provider.loadData(withTypeIdentifier: UTType.plainText.identifier) { data, error in
+      #expect(error == nil)
+      exported = data
+    }
+    #expect(exported.flatMap { String(data: $0, encoding: .utf8) } == "Before")
+  }
+}
+
+private final class ReservationObservation: @unchecked Sendable {
+  private let lock = NSLock()
+  private var largest = 0
+
+  func record(_ bytes: Int) {
+    lock.withLock { largest = max(largest, bytes) }
+  }
+
+  var maximum: Int { lock.withLock { largest } }
 }
 
 private struct FixtureAttachment: Textual.Attachment {

@@ -73,15 +73,18 @@
 
       let attributedText = model.attributedText(in: selectedRange)
       let formatter = Formatter(attributedText)
+      let export = formatter.htmlExport()
 
-      UIPasteboard.general.setItems(
-        [
+      withExtendedLifetime(export) {
+        UIPasteboard.general.setItems(
           [
-            UTType.plainText.identifier: formatter.plainText(),
-            UTType.html.identifier: formatter.html(),
+            [
+              UTType.plainText.identifier: formatter.plainText(),
+              UTType.html.identifier: export.string,
+            ]
           ]
-        ]
-      )
+        )
+      }
     }
 
     private func setUp() {

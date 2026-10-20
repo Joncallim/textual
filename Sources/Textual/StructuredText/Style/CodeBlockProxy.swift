@@ -22,17 +22,23 @@ extension StructuredText {
 
         let formatter = Formatter(AttributedString(content))
         pasteboard.setString(formatter.plainText(), forType: .string)
-        pasteboard.setString(formatter.html(), forType: .html)
+        let export = formatter.htmlExport()
+        withExtendedLifetime(export) {
+          _ = pasteboard.setString(export.string, forType: .html)
+        }
       #elseif TEXTUAL_ENABLE_TEXT_SELECTION && canImport(UIKit)
         let formatter = Formatter(AttributedString(content))
-        UIPasteboard.general.setItems(
-          [
+        let export = formatter.htmlExport()
+        withExtendedLifetime(export) {
+          UIPasteboard.general.setItems(
             [
-              UTType.plainText.identifier: formatter.plainText(),
-              UTType.html.identifier: formatter.html(),
+              [
+                UTType.plainText.identifier: formatter.plainText(),
+                UTType.html.identifier: export.string,
+              ]
             ]
-          ]
-        )
+          )
+        }
       #endif
     }
   }

@@ -286,7 +286,10 @@
 
       let formatter = Formatter(attributedText)
       pasteboard.setString(formatter.plainText(), forType: .string)
-      pasteboard.setString(formatter.html(), forType: .html)
+      let export = formatter.htmlExport()
+      withExtendedLifetime(export) {
+        _ = pasteboard.setString(export.string, forType: .html)
+      }
     }
   }
 
