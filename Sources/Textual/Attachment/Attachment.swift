@@ -43,6 +43,13 @@ public protocol Attachment: Sendable, Hashable, CustomStringConvertible {
   /// Implement this to provide PNG-encoded data for serialization, copy/paste,
   /// or export workflows. The default implementation returns `nil`.
   func pngData() -> Data?
+
+  /// Returns no more than `maxBytes` of PNG data for HTML copy/export.
+  ///
+  /// Implementations handling untrusted images should stop encoding at this limit. The default
+  /// implementation checks `pngData()` after encoding to preserve existing custom attachments;
+  /// it cannot bound their temporary allocation before `pngData()` returns.
+  func boundedPNGData(maxBytes: Int) -> Data?
 }
 
 extension Attachment {
@@ -56,6 +63,11 @@ extension Attachment {
 
   public func pngData() -> Data? {
     nil
+  }
+
+  public func boundedPNGData(maxBytes: Int) -> Data? {
+    guard maxBytes > 0, let data = pngData(), data.count <= maxBytes else { return nil }
+    return data
   }
 }
 
@@ -104,6 +116,10 @@ public struct AnyAttachment: Attachment {
 
   public func pngData() -> Data? {
     base.pngData()
+  }
+
+  public func boundedPNGData(maxBytes: Int) -> Data? {
+    base.boundedPNGData(maxBytes: maxBytes)
   }
 
   public static func == (lhs: Self, rhs: Self) -> Bool {

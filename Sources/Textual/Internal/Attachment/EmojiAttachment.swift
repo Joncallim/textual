@@ -40,4 +40,9 @@ struct EmojiAttachment: Attachment {
   func pngData() -> Data? {
     image.cgImage.pngData()
   }
+
+  @usableFromInline
+  func boundedPNGData(maxBytes: Int) -> Data? {
+    image.cgImage.boundedPNGData(maxBytes: maxBytes)
+  }
 }

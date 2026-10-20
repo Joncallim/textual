@@ -1,33 +1,60 @@
 import Foundation
 
 extension Formatter {
-  func html() -> String {
-    blockNodes.renderHTML()
+  func html(
+    maxImageBytes: Int = 16 * 1024 * 1024,
+    maxTotalImageBytes: Int = 32 * 1024 * 1024
+  ) -> String {
+    blockNodes.renderHTML(
+      imageBudget: HTMLImageBudget(
+        maxImageBytes: maxImageBytes, maxTotalImageBytes: maxTotalImageBytes
+      ))
+  }
+}
+
+/// One synchronous export's encoded image quota. This bounds retained PNG/base64 data even
+/// when an attributed document repeats the same image many times.
+private final class HTMLImageBudget {
+  private let maxImageBytes: Int
+  private(set) var remaining: Int
+
+  init(maxImageBytes: Int, maxTotalImageBytes: Int) {
+    self.maxImageBytes = max(0, maxImageBytes)
+    remaining = max(0, maxTotalImageBytes)
+  }
+
+  func admit(_ attachment: AnyAttachment) -> Data? {
+    let limit = min(maxImageBytes, remaining)
+    guard limit > 0, let data = attachment.boundedPNGData(maxBytes: limit),
+      !data.isEmpty, data.count <= limit
+    else { return nil }
+    remaining -= data.count
+    return data
   }
 }
 
 // MARK: - Inline rendering
 
 extension Formatter.InlineNode {
-  fileprivate func renderHTML() -> String {
+  fileprivate func renderHTML(imageBudget: HTMLImageBudget) -> String {
     switch self {
     case .text(let text):
       return text.htmlEscaped()
     case .code(let code):
       return "<code>\(code.htmlEscaped())</code>"
     case .strong(let children):
-      return "<strong>\(children.renderHTML())</strong>"
+      return "<strong>\(children.renderHTML(imageBudget: imageBudget))</strong>"
     case .emphasized(let children):
-      return "<em>\(children.renderHTML())</em>"
+      return "<em>\(children.renderHTML(imageBudget: imageBudget))</em>"
     case .strikethrough(let children):
-      return "<del>\(children.renderHTML())</del>"
+      return "<del>\(children.renderHTML(imageBudget: imageBudget))</del>"
     case .link(let url, let children):
       let href = url.absoluteString.htmlAttributeEscaped()
-      return #"<a href="\#(href)">\#(children.renderHTML())</a>"#
+      return #"<a href="\#(href)">\#(children.renderHTML(imageBudget: imageBudget))</a>"#
     case .lineBreak:
       return "<br />"
     case .attachment(let attachment):
-      guard let imageData = attachment.pngData() else {
+      guard let imageData = imageBudget.admit(attachment) else {
         return attachment.description.htmlEscaped()
       }
       let base64 = imageData.base64EncodedString()
@@ -37,9 +64,9 @@ extension Formatter.InlineNode {
 }
 
 extension Array where Element == Formatter.InlineNode {
-  fileprivate func renderHTML() -> String {
+  fileprivate func renderHTML(imageBudget: HTMLImageBudget) -> String {
     self.map {
-      $0.renderHTML()
+      $0.renderHTML(imageBudget: imageBudget)
     }.joined()
   }
 }
@@ -47,19 +74,19 @@ extension Array where Element == Formatter.InlineNode {
 // MARK: - Block rendering
 
 extension Formatter.BlockNode {
-  fileprivate func renderHTML() -> String {
+  fileprivate func renderHTML(imageBudget: HTMLImageBudget) -> String {
     switch self {
     case .paragraph(let children):
-      return "<p>\(children.renderHTML())</p>"
+      return "<p>\(children.renderHTML(imageBudget: imageBudget))</p>"
     case .header(let level, let children):
       let l = max(1, min(6, level))
-      return "<h\(l)>\(children.renderHTML())</h\(l)>"
+      return "<h\(l)>\(children.renderHTML(imageBudget: imageBudget))</h\(l)>"
     case .orderedList(let children):
       let start = children.map(\.ordinal).min() ?? 1
       let startAttribute = start > 1 ? #" start="\#(start)""# : ""
-      return "<ol\(startAttribute)>\n\(children.renderHTML())\n</ol>"
+      return "<ol\(startAttribute)>\n\(children.renderHTML(imageBudget: imageBudget))\n</ol>"
     case .unorderedList(let children):
-      return "<ul>\n\(children.renderHTML())\n</ul>"
+      return "<ul>\n\(children.renderHTML(imageBudget: imageBudget))\n</ul>"
     case .codeBlock(let languageHint, let code):
       let classAttribute =
         languageHint.flatMap {
@@ -69,12 +96,16 @@ extension Formatter.BlockNode {
         } ?? ""
       return "<pre><code\(classAttribute)>\(code.htmlCodeEscaped())</code></pre>"
     case .blockQuote(let children):
-      return "<blockquote>\n\(children.renderHTML())\n</blockquote>"
+      return "<blockquote>\n\(children.renderHTML(imageBudget: imageBudget))\n</blockquote>"
     case .table(let columns, let children):
-      guard let headerHTML = children.first?.renderHeaderHTML(columns: columns) else {
+      guard
+        let headerHTML = children.first?.renderHeaderHTML(
+          columns: columns, imageBudget: imageBudget)
+      else {
         return "<table></table>"
       }
-      let bodyHTML = Array(children.dropFirst()).renderHTML(columns: columns)
+      let bodyHTML = Array(children.dropFirst()).renderHTML(
+        columns: columns, imageBudget: imageBudget)
 
       if bodyHTML.isEmpty {
         return "<table>\n<thead>\n\(headerHTML)\n</thead>\n</table>"
@@ -88,9 +119,9 @@ extension Formatter.BlockNode {
 }
 
 extension Array where Element == Formatter.BlockNode {
-  fileprivate func renderHTML() -> String {
+  fileprivate func renderHTML(imageBudget: HTMLImageBudget) -> String {
     self.map {
-      $0.renderHTML()
+      $0.renderHTML(imageBudget: imageBudget)
     }.joined(separator: "\n")
   }
 }
@@ -98,30 +129,37 @@ extension Array where Element == Formatter.BlockNode {
 // MARK: - Table rendering
 
 extension Formatter.TableRow {
-  fileprivate func renderHeaderHTML(columns: [PresentationIntent.TableColumn]) -> String {
-    renderHTML("th", columns: columns)
+  fileprivate func renderHeaderHTML(
+    columns: [PresentationIntent.TableColumn], imageBudget: HTMLImageBudget
+  ) -> String {
+    renderHTML("th", columns: columns, imageBudget: imageBudget)
   }
 
-  fileprivate func renderDataHTML(columns: [PresentationIntent.TableColumn]) -> String {
-    renderHTML("td", columns: columns)
+  fileprivate func renderDataHTML(
+    columns: [PresentationIntent.TableColumn], imageBudget: HTMLImageBudget
+  ) -> String {
+    renderHTML("td", columns: columns, imageBudget: imageBudget)
   }
 
   private func renderHTML(
     _ element: String,
-    columns: [PresentationIntent.TableColumn]
+    columns: [PresentationIntent.TableColumn],
+    imageBudget: HTMLImageBudget
   ) -> String {
     let alignments = columns.map(\.alignment)
     let cells = zip(alignments, self.cells).map { alignment, inlines in
-      #"<\#(element) align="\#(alignment)">\#(inlines.renderHTML())</\#(element)>"#
+      #"<\#(element) align="\#(alignment)">\#(inlines.renderHTML(imageBudget: imageBudget))</\#(element)>"#
     }
     return "<tr>\n\(cells.joined(separator: "\n"))\n</tr>"
   }
 }
 
 extension Array where Element == Formatter.TableRow {
-  fileprivate func renderHTML(columns: [PresentationIntent.TableColumn]) -> String {
+  fileprivate func renderHTML(
+    columns: [PresentationIntent.TableColumn], imageBudget: HTMLImageBudget
+  ) -> String {
     self.map {
-      $0.renderDataHTML(columns: columns)
+      $0.renderDataHTML(columns: columns, imageBudget: imageBudget)
     }.joined(separator: "\n")
   }
 }
@@ -129,7 +167,7 @@ extension Array where Element == Formatter.TableRow {
 // MARK: - List rendering
 
 extension Formatter.ListItem {
-  fileprivate func renderHTML() -> String {
+  fileprivate func renderHTML(imageBudget: HTMLImageBudget) -> String {
     // NB: Tight vs. loose list detection. When Markdown has blank lines between list items,
     //     the parser creates multiple paragraph blocks. Single paragraph = tight (no <p> tags),
     //     multiple paragraphs = loose (wrap content in <p> tags).
@@ -143,7 +181,7 @@ extension Formatter.ListItem {
       blocks.count == 1,
       case .paragraph(let children) = blocks[0]
     {
-      return "<li>\(children.renderHTML())</li>"
+      return "<li>\(children.renderHTML(imageBudget: imageBudget))</li>"
     }
 
     // Tight list with single paragraph + other blocks (nested lists, etc.)
@@ -157,19 +195,20 @@ extension Formatter.ListItem {
       let otherBlocks = blocks.enumerated().filter { $0.offset != firstParagraphIndex }.map {
         $0.element
       }
-      let otherHTML = otherBlocks.renderHTML()
-      return "<li>\(children.renderHTML())\(otherHTML)</li>"
+      let paragraphHTML = children.renderHTML(imageBudget: imageBudget)
+      let otherHTML = otherBlocks.renderHTML(imageBudget: imageBudget)
+      return "<li>\(paragraphHTML)\(otherHTML)</li>"
     }
 
     // Loose list - multiple paragraphs mean blank lines existed
-    return "<li>\(blocks.renderHTML())</li>"
+    return "<li>\(blocks.renderHTML(imageBudget: imageBudget))</li>"
   }
 }
 
 extension Array where Element == Formatter.ListItem {
-  fileprivate func renderHTML() -> String {
+  fileprivate func renderHTML(imageBudget: HTMLImageBudget) -> String {
     self.map {
-      $0.renderHTML()
+      $0.renderHTML(imageBudget: imageBudget)
     }.joined(separator: "\n")
   }
 }
