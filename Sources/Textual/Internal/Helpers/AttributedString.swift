@@ -6,8 +6,7 @@ extension AttributedStringProtocol {
 
     guard
       attachments.count == 1,
-      let attachment = attachments.first?.base as? MathAttachment,
-      case .block = attachment.displayStyle
+      attachments.first?.isDisplayMath == true
     else {
       return false
     }

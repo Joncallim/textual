@@ -18,7 +18,19 @@ public struct AttachmentAccessibility: Sendable, Hashable {
 extension AnyAttachment {
   /// Supplies semantics without replacing the attachment's drawing or measurement.
   public func withAccessibility(_ descriptor: AttachmentAccessibility) -> Self {
-    .init(AccessibleAttachment(base: self, descriptor: descriptor))
+    // Replacing a descriptor retains a single semantic wrapper.
+    let underlying = (base as? AccessibleAttachment)?.base ?? self
+    return .init(AccessibleAttachment(base: underlying, descriptor: descriptor))
+  }
+
+  var isDisplayMath: Bool {
+    if let wrapper = base as? AccessibleAttachment {
+      return wrapper.base.isDisplayMath
+    }
+    guard let math = base as? MathAttachment, case .block = math.displayStyle else {
+      return false
+    }
+    return true
   }
 }
 
