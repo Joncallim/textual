@@ -57,6 +57,41 @@ struct AttachmentView: View {
           .tag(attachment)
       }
     }
+    .overlay(alignment: .topLeading) { accessibilityElements }
+  }
+
+  /// Canvas draws symbols but does not publish the symbol views' semantics.
+  /// Keep a separate, non-intercepting semantic element at each actual run rect.
+  private var accessibilityElements: some View {
+    ZStack(alignment: .topLeading) {
+      ForEach(accessibleRuns) { run in
+        Color.clear
+          .frame(width: run.rect.width, height: run.rect.height)
+          .modifier(AttachmentAccessibilityModifier(descriptor: run.descriptor))
+          .position(x: run.rect.midX, y: run.rect.midY)
+      }
+    }
+    .allowsHitTesting(false)
+  }
+
+  private struct AccessibleRun: Identifiable {
+    let id: String
+    let descriptor: AttachmentAccessibility
+    let rect: CGRect
+  }
+
+  private var accessibleRuns: [AccessibleRun] {
+    var result: [AccessibleRun] = []
+    for (lineIndex, line) in zip(layout.indices, layout) {
+      for (runIndex, run) in zip(line.indices, line) {
+        guard let descriptor = run.attachment?.accessibility else { continue }
+        let rect = run.typographicBounds.rect.offsetBy(dx: origin.x, dy: origin.y)
+        guard rect.minX.isFinite, rect.minY.isFinite, rect.width.isFinite, rect.height.isFinite,
+          rect.width > 0, rect.height > 0 else { continue }
+        result.append(AccessibleRun(id: "\(lineIndex):\(runIndex)", descriptor: descriptor, rect: rect))
+      }
+    }
+    return result
   }
 
   private func opacity(

@@ -22,6 +22,10 @@ public enum AttachmentSelectionStyle: Sendable {
 public protocol Attachment: Sendable, Hashable, CustomStringConvertible {
   associatedtype Body: View
 
+  /// Optional caller-owned semantics for the actual inline layout occurrence.
+  /// Canvas symbol bodies alone do not expose their accessibility elements.
+  var accessibility: AttachmentAccessibility? { get }
+
   /// Controls how text selection affects the attachment.
   ///
   /// The default implementation returns `.object`.
@@ -53,6 +57,8 @@ public protocol Attachment: Sendable, Hashable, CustomStringConvertible {
 }
 
 extension Attachment {
+  public var accessibility: AttachmentAccessibility? { nil }
+
   public var selectionStyle: AttachmentSelectionStyle {
     .object
   }
@@ -98,6 +104,8 @@ public struct AnyAttachment: Attachment {
   public var selectionStyle: AttachmentSelectionStyle {
     base.selectionStyle
   }
+
+  public var accessibility: AttachmentAccessibility? { base.accessibility }
 
   public var body: AnyView {
     AnyView(base.body)
