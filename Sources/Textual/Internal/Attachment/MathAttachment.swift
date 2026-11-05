@@ -1,5 +1,5 @@
 import SwiftUI
-@_spi(Textual) private import SwiftUIMath
+@_spi(Textual) import SwiftUIMath
 
 struct MathAttachment: Attachment {
   enum DisplayStyle: Sendable {
@@ -23,15 +23,24 @@ struct MathAttachment: Attachment {
   let latex: String
   let displayStyle: DisplayStyle
   let sourceID: UUID?
+  let validatedBody: Math.ValidatedBody?
 
   init(latex: String, style: DisplayStyle, sourceID: UUID? = nil) {
     self.latex = latex
     self.displayStyle = style
     self.sourceID = sourceID
+    self.validatedBody = nil
+  }
+
+  init(body: Math.ValidatedBody, style: DisplayStyle, sourceID: UUID? = nil) {
+    self.latex = body.source
+    self.displayStyle = style
+    self.sourceID = sourceID
+    self.validatedBody = body
   }
 
   var body: some View {
-    MathView(latex: latex, style: displayStyle)
+    MathView(latex: latex, validatedBody: validatedBody, style: displayStyle)
   }
 
   func baselineOffset(in environment: TextEnvironmentValues) -> CGFloat {
@@ -46,14 +55,17 @@ struct MathAttachment: Attachment {
     fitting proposal: ProposedViewSize = .unspecified,
     in environment: TextEnvironmentValues
   ) -> Math.TypographicBounds {
-    Math.typographicBounds(
-      for: latex,
-      fitting: proposal,
-      font: .init(
-        name: .init(environment.mathProperties.fontName),
-        size: FontScaled(environment.mathProperties.fontScale).resolve(in: environment)
-      ),
-      style: .init(displayStyle)
+    let font = Math.Font(
+      name: .init(environment.mathProperties.fontName),
+      size: FontScaled(environment.mathProperties.fontScale).resolve(in: environment)
+    )
+    if let validatedBody {
+      return Math.typographicBounds(
+        for: validatedBody, fitting: proposal, font: font, style: .init(displayStyle)
+      )
+    }
+    return Math.typographicBounds(
+      for: latex, fitting: proposal, font: font, style: .init(displayStyle)
     )
   }
 }
@@ -62,10 +74,11 @@ private struct MathView: View {
   @Environment(\.textEnvironment) private var environment
 
   let latex: String
+  let validatedBody: Math.ValidatedBody?
   let style: MathAttachment.DisplayStyle
 
   var body: some View {
-    Math(latex)
+    math
       .mathFont(
         .init(
           name: .init(environment.mathProperties.fontName),
@@ -75,6 +88,11 @@ private struct MathView: View {
       .mathTypesettingStyle(.init(style))
       .mathRenderingMode(.monochrome)
   }
+
+  private var math: Math {
+    if let validatedBody { Math(validatedBody) } else { Math(latex) }
+  }
+
 }
 
 extension Math.Font.Name {

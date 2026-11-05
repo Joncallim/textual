@@ -1,4 +1,5 @@
 import Foundation
+public import SwiftUIMath
 
 extension AnyAttachment {
   /// The placement of an equation in its surrounding text.
@@ -25,4 +26,21 @@ extension AnyAttachment {
     }
     return .init(MathAttachment(latex: latex, style: displayStyle, sourceID: sourceID))
   }
+
+  /// Creates the same native attachment with raw-body parsing and the admitted engine limits.
+  /// No delimiter detection occurs during metrics, layout or drawing. Source identity is
+  /// caller-owned and remains separate from the expression's render-cache identity.
+  public static func math(
+    body: SwiftUIMath.Math.ValidatedBody,
+    style: MathStyle,
+    sourceID: UUID? = nil
+  ) -> Self {
+    let displayStyle: MathAttachment.DisplayStyle
+    switch style {
+    case .inline: displayStyle = .inline
+    case .display: displayStyle = .block
+    }
+    return .init(MathAttachment(body: body, style: displayStyle, sourceID: sourceID))
+  }
+
 }
