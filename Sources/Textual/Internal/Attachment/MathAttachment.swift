@@ -22,10 +22,12 @@ struct MathAttachment: Attachment {
 
   let latex: String
   let displayStyle: DisplayStyle
+  let sourceID: UUID?
 
-  init(latex: String, style: DisplayStyle) {
+  init(latex: String, style: DisplayStyle, sourceID: UUID? = nil) {
     self.latex = latex
     self.displayStyle = style
+    self.sourceID = sourceID
   }
 
   var body: some View {
