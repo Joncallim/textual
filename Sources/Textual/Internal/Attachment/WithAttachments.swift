@@ -46,6 +46,7 @@ struct WithAttachments<Content: View>: View {
 extension WithAttachments {
   @MainActor @Observable final class Model {
     var resolvedAttributedString: AttributedString?
+    @ObservationIgnored private var requestIdentity: UUID?
 
     func resolveAttachments(
       in attributedString: AttributedString,
@@ -53,9 +54,15 @@ extension WithAttachments {
       emojiAttachmentLoader: any AttachmentLoader,
       environment: ColorEnvironmentValues
     ) async {
+      // A task cancelled before entry must not clear a newer request's result.
+      guard !Task.isCancelled else { return }
+      requestIdentity = nil
+      resolvedAttributedString = nil
       guard attributedString.containsValues(for: [\.imageURL, \.textual.emojiURL]) else {
         return
       }
+      let requestID = UUID()
+      requestIdentity = requestID
 
       var attachments: [AnyAttachment] = []
       var ranges: [Range<AttributedString.Index>] = []
@@ -93,6 +100,8 @@ extension WithAttachments {
         }
       }
 
+      // Loaders may finish after cancellation or a newer request. Publication stays with this source.
+      guard requestIdentity == requestID, !Task.isCancelled else { return }
       resolveAttachmentsFinished(
         attributedString: attributedString,
         attachments: Array(zip(ranges, attachments))
