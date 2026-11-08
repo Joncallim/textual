@@ -19,11 +19,13 @@ import SwiftUI
 extension TextFragment {
   @MainActor @Observable final class TextBuilder {
     var text: Text
+    @ObservationIgnored let diagnosticAttachmentRuns: Int
 
     @ObservationIgnored private let content: Content
     @ObservationIgnored private let cache: NSCache<KeyBox<[AttachmentKey: CGSize]>, Box<Text>>
 
     init(_ content: Content, environment: TextEnvironmentValues) {
+      self.diagnosticAttachmentRuns = content.runs.filter { $0.textual.attachment != nil }.count
       let attachmentSizes = content.attachmentSizes(for: .unspecified, in: environment)
 
       self.text = Text(

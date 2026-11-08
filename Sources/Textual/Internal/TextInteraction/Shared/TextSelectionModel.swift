@@ -67,6 +67,10 @@
       )
     }
 
+    func diagnosticLayoutSummary() -> String {
+      diagnosticTextLayoutSummary(layoutCollection)
+    }
+
     func setCoordinator(_ coordinator: TextSelectionCoordinator?) {
       if self.coordinator === coordinator {
         return

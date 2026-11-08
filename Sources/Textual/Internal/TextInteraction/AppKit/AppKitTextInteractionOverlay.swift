@@ -20,17 +20,28 @@
     }
 
     func makeNSView(context: Context) -> NSTextInteractionView {
-      NSTextInteractionView(
+      let view = NSTextInteractionView(
         model: model,
         exclusionRects: overflowFrames,
         openURL: context.environment.openURL
       )
+      if let loadID = context.environment.mostlytextAttachmentDiagnosticLoadID {
+        print("TEXTUAL_NATIVE_SELECTION loadID=\(loadID.uuidString) "
+          + "viewID=\(ObjectIdentifier(view)) modelID=\(ObjectIdentifier(model)) "
+          + "phase=make stored=\(model.diagnosticLayoutSummary())")
+      }
+      return view
     }
 
     func updateNSView(_ nsView: NSTextInteractionView, context: Context) {
       nsView.model = model
       nsView.exclusionRects = overflowFrames
       nsView.openURL = context.environment.openURL
+      if let loadID = context.environment.mostlytextAttachmentDiagnosticLoadID {
+        print("TEXTUAL_NATIVE_SELECTION loadID=\(loadID.uuidString) "
+          + "viewID=\(ObjectIdentifier(nsView)) modelID=\(ObjectIdentifier(model)) "
+          + "phase=update stored=\(model.diagnosticLayoutSummary())")
+      }
     }
   }
 #endif

@@ -27,6 +27,7 @@ import SwiftUI
 
 struct TextFragment<Content: AttributedStringProtocol>: View {
   @Environment(\.textEnvironment) private var textEnvironment
+  @Environment(\.mostlytextAttachmentDiagnosticLoadID) private var diagnosticLoadID
   @State private var textBuilder: TextBuilder?
 
   private let content: Content
@@ -36,6 +37,7 @@ struct TextFragment<Content: AttributedStringProtocol>: View {
   }
 
   var body: some View {
+    let _ = traceDiagnostic("body")
     text
       .customAttribute(TextFragmentAttribute())
       .onGeometryChange(for: CGSize?.self, of: \.textContainerSize) { size in
@@ -43,6 +45,11 @@ struct TextFragment<Content: AttributedStringProtocol>: View {
         textBuilder.sizeChanged(size, environment: textEnvironment)
       }
       .onChange(of: content, initial: true) { _, newValue in
+        if let diagnosticLoadID {
+          print("TEXTUAL_FRAGMENT loadID=\(diagnosticLoadID.uuidString) "
+            + "phase=on-change inputAttachmentRuns=\(newValue.runs.filter { $0.textual.attachment != nil }.count) "
+            + "priorBuilderAttachmentRuns=\(textBuilder?.diagnosticAttachmentRuns ?? -1)")
+        }
         self.textBuilder = TextBuilder(newValue, environment: textEnvironment)
       }
       .modifier(TextSelectionBackground())
@@ -52,6 +59,14 @@ struct TextFragment<Content: AttributedStringProtocol>: View {
 
   private var text: Text {
     textBuilder?.text ?? Text(verbatim: "")
+  }
+
+  private func traceDiagnostic(_ phase: String) {
+    if let diagnosticLoadID {
+      print("TEXTUAL_FRAGMENT loadID=\(diagnosticLoadID.uuidString) phase=\(phase) "
+        + "inputAttachmentRuns=\(content.runs.filter { $0.textual.attachment != nil }.count) "
+        + "builderAttachmentRuns=\(textBuilder?.diagnosticAttachmentRuns ?? -1)")
+    }
   }
 }
 
