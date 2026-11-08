@@ -18,6 +18,9 @@ struct TextSelectionInteraction: ViewModifier {
     @Environment(\.mostlytextAttachmentDiagnosticLoadID) private var diagnosticLoadID
 
     @State private var model = TextSelectionModel()
+    @State private var layoutHandoff = LatestMainActorHandoff<SelectionLayoutOffer> { offer in
+      offer.apply()
+    }
   #endif
 
   func body(content: Content) -> some View {
@@ -25,27 +28,24 @@ struct TextSelectionInteraction: ViewModifier {
       if textSelection.allowsSelection {
         content
           .overlayTextLayoutCollection { layoutCollection in
+            let offer = SelectionLayoutOffer(
+              layoutCollection: layoutCollection,
+              model: model,
+              coordinator: coordinator,
+              diagnosticLoadID: diagnosticLoadID
+            )
             let _ = diagnosticLoadID.map { loadID in
               print("TEXTUAL_SELECTION_LAYOUT loadID=\(loadID.uuidString) "
                 + "modelID=\(ObjectIdentifier(model)) phase=offered "
                 + "offered=\(diagnosticTextLayoutSummary(layoutCollection))")
             }
+            let _ = layoutHandoff.offer(offer)
             Color.clear
-              .task(id: AnyTextLayoutCollection(layoutCollection)) {
-                guard !Task.isCancelled else { return }
-                if let diagnosticLoadID {
-                  print("TEXTUAL_SELECTION_LAYOUT loadID=\(diagnosticLoadID.uuidString) "
-                    + "modelID=\(ObjectIdentifier(model)) phase=task-before "
-                    + "offered=\(diagnosticTextLayoutSummary(layoutCollection)) "
-                    + "stored=\(model.diagnosticLayoutSummary())")
-                }
-                model.setCoordinator(coordinator)
-                model.setLayoutCollection(layoutCollection)
-                if let diagnosticLoadID {
-                  print("TEXTUAL_SELECTION_LAYOUT loadID=\(diagnosticLoadID.uuidString) "
-                    + "modelID=\(ObjectIdentifier(model)) phase=task-after "
-                    + "stored=\(model.diagnosticLayoutSummary())")
-                }
+              .onAppear {
+                layoutHandoff.appear()
+              }
+              .onDisappear {
+                layoutHandoff.disappear()
               }
           }
           .modifier(PlatformTextSelectionInteraction(model: model))
@@ -57,6 +57,32 @@ struct TextSelectionInteraction: ViewModifier {
     #endif
   }
 }
+
+#if TEXTUAL_ENABLE_TEXT_SELECTION
+  private struct SelectionLayoutOffer {
+    let layoutCollection: any TextLayoutCollection
+    let model: TextSelectionModel
+    let coordinator: TextSelectionCoordinator?
+    let diagnosticLoadID: UUID?
+
+    @MainActor
+    func apply() {
+      if let diagnosticLoadID {
+        print("TEXTUAL_SELECTION_LAYOUT loadID=\(diagnosticLoadID.uuidString) "
+          + "modelID=\(ObjectIdentifier(model)) phase=handoff-before "
+          + "offered=\(diagnosticTextLayoutSummary(layoutCollection)) "
+          + "stored=\(model.diagnosticLayoutSummary())")
+      }
+      model.setCoordinator(coordinator)
+      model.setLayoutCollection(layoutCollection)
+      if let diagnosticLoadID {
+        print("TEXTUAL_SELECTION_LAYOUT loadID=\(diagnosticLoadID.uuidString) "
+          + "modelID=\(ObjectIdentifier(model)) phase=handoff-after "
+          + "stored=\(model.diagnosticLayoutSummary())")
+      }
+    }
+  }
+#endif
 
 #if TEXTUAL_ENABLE_TEXT_SELECTION
   func diagnosticTextLayoutSummary(_ collection: any TextLayoutCollection) -> String {
