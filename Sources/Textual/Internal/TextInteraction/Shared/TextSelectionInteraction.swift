@@ -25,11 +25,17 @@ struct TextSelectionInteraction: ViewModifier {
       if textSelection.allowsSelection {
         content
           .overlayTextLayoutCollection { layoutCollection in
+            let _ = diagnosticLoadID.map { loadID in
+              print("TEXTUAL_SELECTION_LAYOUT loadID=\(loadID.uuidString) "
+                + "modelID=\(ObjectIdentifier(model)) phase=offered "
+                + "offered=\(diagnosticTextLayoutSummary(layoutCollection))")
+            }
             Color.clear
-              .onChange(of: AnyTextLayoutCollection(layoutCollection), initial: true) {
+              .task(id: AnyTextLayoutCollection(layoutCollection)) {
+                guard !Task.isCancelled else { return }
                 if let diagnosticLoadID {
                   print("TEXTUAL_SELECTION_LAYOUT loadID=\(diagnosticLoadID.uuidString) "
-                    + "modelID=\(ObjectIdentifier(model)) phase=on-change-before "
+                    + "modelID=\(ObjectIdentifier(model)) phase=task-before "
                     + "offered=\(diagnosticTextLayoutSummary(layoutCollection)) "
                     + "stored=\(model.diagnosticLayoutSummary())")
                 }
@@ -37,7 +43,7 @@ struct TextSelectionInteraction: ViewModifier {
                 model.setLayoutCollection(layoutCollection)
                 if let diagnosticLoadID {
                   print("TEXTUAL_SELECTION_LAYOUT loadID=\(diagnosticLoadID.uuidString) "
-                    + "modelID=\(ObjectIdentifier(model)) phase=on-change-after "
+                    + "modelID=\(ObjectIdentifier(model)) phase=task-after "
                     + "stored=\(model.diagnosticLayoutSummary())")
                 }
               }
