@@ -17,6 +17,9 @@ struct TextSelectionInteraction: ViewModifier {
     @Environment(TextSelectionCoordinator.self) private var coordinator: TextSelectionCoordinator?
 
     @State private var model = TextSelectionModel()
+    @State private var layoutHandoff = LatestMainActorHandoff<SelectionLayoutOffer> { offer in
+      offer.apply()
+    }
   #endif
 
   func body(content: Content) -> some View {
@@ -24,10 +27,18 @@ struct TextSelectionInteraction: ViewModifier {
       if textSelection.allowsSelection {
         content
           .overlayTextLayoutCollection { layoutCollection in
+            let offer = SelectionLayoutOffer(
+              layoutCollection: layoutCollection,
+              model: model,
+              coordinator: coordinator
+            )
+            let _ = layoutHandoff.offer(offer)
             Color.clear
-              .onChange(of: AnyTextLayoutCollection(layoutCollection), initial: true) {
-                model.setCoordinator(coordinator)
-                model.setLayoutCollection(layoutCollection)
+              .onAppear {
+                layoutHandoff.appear()
+              }
+              .onDisappear {
+                layoutHandoff.disappear()
               }
           }
           .modifier(PlatformTextSelectionInteraction(model: model))
@@ -39,6 +50,20 @@ struct TextSelectionInteraction: ViewModifier {
     #endif
   }
 }
+
+#if TEXTUAL_ENABLE_TEXT_SELECTION
+  private struct SelectionLayoutOffer {
+    let layoutCollection: any TextLayoutCollection
+    let model: TextSelectionModel
+    let coordinator: TextSelectionCoordinator?
+
+    @MainActor
+    func apply() {
+      model.setCoordinator(coordinator)
+      model.setLayoutCollection(layoutCollection)
+    }
+  }
+#endif
 
 #if TEXTUAL_ENABLE_TEXT_SELECTION
   extension EnvironmentValues {
